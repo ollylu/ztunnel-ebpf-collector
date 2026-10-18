@@ -1,0 +1,13 @@
+#!/bin/sh
+# 本项目本地 post-commit（显式启用，仅仓库级）：串行 check → build → image → chart。
+# 一次一构建（make ci 自带锁）；失败写回执并保留上次成功制品；不阻塞后续提交。
+set -e
+cd "$(git rev-parse --show-toplevel)"
+mkdir -p dist/.hook-logs
+log="dist/.hook-logs/$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD).log"
+if CGO_ENABLED=0 make ci >"$log" 2>&1; then
+  echo "post-commit: make ci OK ($log)"
+else
+  echo "post-commit: make ci FAILED — failure receipt/log kept ($log)"
+fi
+exit 0

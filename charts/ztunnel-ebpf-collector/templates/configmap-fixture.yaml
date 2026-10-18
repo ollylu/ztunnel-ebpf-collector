@@ -1,0 +1,10 @@
+{{- if not .Values.capture }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-replay-fixture
+data:
+  colored_pair.jsonl: |
+    {"source_kind":"synthetic_replay","request":"POST /demo HTTP/1.1\r\nHost: demo.local\r\nX-Trace: print\r\nContent-Length: 11\r\n\r\nhello-world","response":"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nresp-body"}
+
+{{- end }}

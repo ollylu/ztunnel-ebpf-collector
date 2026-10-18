@@ -1,0 +1,6 @@
+javaEnabled: false
+image: ztunnel-spring-nacos:unset
+nacosImage: nacos/nacos-server:v2.4.3
+nodeA: "" # Set an approved Linux amd64 test node name before deployment.
+nodeB: "" # Set a second approved Linux amd64 test node name.
+nacosObserved: false

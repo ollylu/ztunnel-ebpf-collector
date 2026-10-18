@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-nacos
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: "{{ .Release.Name }}-nacos"}
+  template:
+    metadata:
+      labels: {app: "{{ .Release.Name }}-nacos", observe: {{ ternary "yes" "no" .Values.nacosObserved | quote }}}
+      annotations: {dapr.io/enabled: "false"}
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector: {kubernetes.io/hostname: {{ .Values.nodeA | quote }}}
+      securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true}
+      containers:
+        - name: nacos
+          image: {{ .Values.nacosImage | quote }}
+          imagePullPolicy: Never
+          env:
+            - {name: MODE, value: standalone}
+            - {name: FUNCTION_MODE, value: config}
+            - {name: NACOS_AUTH_ENABLE, value: "false"}
+            - {name: JVM_XMS, value: 128m}
+            - {name: JVM_XMX, value: 384m}
+            - {name: JVM_XMN, value: 64m}
+            - {name: JAVA_TOOL_OPTIONS, value: "-XX:ActiveProcessorCount=2"}
+          ports:
+            - {name: http, containerPort: 8848}
+            - {name: grpc, containerPort: 9848}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 768Mi, ephemeral-storage: 512Mi}
+          startupProbe: {httpGet: {path: /nacos/v1/console/health/readiness, port: 8848}, failureThreshold: 60, periodSeconds: 3}
+          readinessProbe: {httpGet: {path: /nacos/v1/console/health/readiness, port: 8848}, periodSeconds: 5}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: data, mountPath: /home/nacos/data}
+            - {name: logs, mountPath: /home/nacos/logs}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: data, emptyDir: {sizeLimit: 128Mi}}
+        - {name: logs, emptyDir: {sizeLimit: 128Mi}}
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: "{{ .Release.Name }}-nacos"}
+spec:
+  selector: {app: "{{ .Release.Name }}-nacos"}
+  ports:
+    - {name: http, port: 8848, targetPort: 8848}
+    - {name: grpc, port: 9848, targetPort: 9848}
+{{- if .Values.javaEnabled }}
+{{- range $role := list "a" "b" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: "{{ $.Release.Name }}-{{ $role }}"}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: "{{ $.Release.Name }}-{{ $role }}"}
+  template:
+    metadata:
+      labels: {app: "{{ $.Release.Name }}-{{ $role }}", observe: "yes"}
+      annotations: {dapr.io/enabled: "false"}
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/hostname: {{ ternary $.Values.nodeA $.Values.nodeB (eq $role "a") | quote }}
+      securityContext: {runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, runAsNonRoot: true}
+      containers:
+        - name: spring
+          image: {{ $.Values.image | quote }}
+          imagePullPolicy: Never
+          env:
+            - {name: NACOS_ADDR, value: "{{ $.Release.Name }}-nacos:8848"}
+            - {name: DEMO_ROLE, value: "spring-{{ $role }}"}
+            - {name: DOWNSTREAM_URL, value: "http://{{ $.Release.Name }}-b:8080"}
+            - {name: JAVA_TOOL_OPTIONS, value: "-Xms64m -Xmx192m -XX:ActiveProcessorCount=2 -Duser.home=/tmp"}
+          ports: [{name: http, containerPort: 8080}]
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi, ephemeral-storage: 192Mi}
+          startupProbe: {httpGet: {path: /healthz, port: 8080}, failureThreshold: 60, periodSeconds: 3}
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {sizeLimit: 128Mi}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: "{{ $.Release.Name }}-{{ $role }}"}
+spec:
+  selector: {app: "{{ $.Release.Name }}-{{ $role }}"}
+  ports: [{name: http, port: 8080, targetPort: 8080}]
+{{- end }}
+{{- end }}

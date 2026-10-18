@@ -1,0 +1,25 @@
+.DS_Store
+.local/
+dist/
+.env
+.env.*
+*.pem
+*.key
+kubeconfig*
+coverage.out
+*.test
+
+# Private operations and raw runtime evidence are not public release inputs.
+AGENTS.md
+tasks/
+evidence/
+docs/reviews/
+docs/qa/
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.kubeconfig
+*.har
+*.pcap
+*.pcapng

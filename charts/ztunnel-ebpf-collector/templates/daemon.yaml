@@ -1,0 +1,135 @@
+{{- if .Values.daemon.enabled }}
+{{- if or .Values.capture .Values.syntheticReplay }}{{ fail "daemon requires capture=false and syntheticReplay=false" }}{{ end }}
+{{- $namespaces := .Values.daemon.namespaces }}
+{{- if .Values.daemon.namespace }}
+{{- if $namespaces }}{{ fail "use daemon.namespaces or daemon.namespace, not both" }}{{ end }}
+{{- $namespaces = list .Values.daemon.namespace }}
+{{- end }}
+{{- if not (kindIs "slice" $namespaces) }}{{ fail "daemon.namespaces must be a list" }}{{ end }}
+{{- if or (not $namespaces) (gt (len $namespaces) 32) }}{{ fail "daemon requires 1 to 32 namespaces" }}{{ end }}
+{{- $seen := dict }}
+{{- range $ns := $namespaces }}
+{{- if not (kindIs "string" $ns) }}{{ fail "namespace must be a string" }}{{ end }}
+{{- if or (gt (len $ns) 63) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $ns)) (hasKey $seen $ns) }}{{ fail "namespaces must be unique DNS labels" }}{{ end }}
+{{- $_ := set $seen $ns true }}
+{{- end }}
+{{- if not (has .Values.daemon.direction (list "inbound" "outbound" "both")) }}{{ fail "daemon.direction must be inbound, outbound or both" }}{{ end }}
+{{- $selector := required "daemon.selector is required" .Values.daemon.selector }}
+{{- $header := required "captureConfig.markerHeader is required" .Values.captureConfig.markerHeader }}
+{{- $value := required "captureConfig.markerValue is required" .Values.captureConfig.markerValue }}
+{{- range $key, $expected := dict "kubernetes.io/os" "linux" "kubernetes.io/arch" "amd64" }}
+{{- if and (hasKey $.Values.daemon.nodeSelector $key) (ne (index $.Values.daemon.nodeSelector $key) $expected) }}{{ fail "daemon requires linux/amd64 nodes" }}{{ end }}
+{{- end }}
+{{- $rbac := printf "%s-%s-node" .Release.Namespace .Release.Name }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-node
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $rbac }}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $rbac }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $rbac }}
+subjects:
+- kind: ServiceAccount
+  name: {{ .Release.Name }}-node
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .Release.Name }}-node
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}-node}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 0}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}-node
+        istio.io/dataplane-mode: none
+        sidecar.istio.io/inject: "false"
+    spec:
+      serviceAccountName: {{ .Release.Name }}-node
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      hostPID: true
+      terminationGracePeriodSeconds: 10
+      nodeSelector:
+        {{- toYaml (merge (dict "kubernetes.io/os" "linux" "kubernetes.io/arch" "amd64") .Values.daemon.nodeSelector) | nindent 8 }}
+      {{- with .Values.daemon.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.daemon.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      containers:
+      - name: collector
+        image: {{ include "collector.image" . | quote }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+        - node
+        - --node
+        - $(NODE_NAME)
+        {{- range $ns := $namespaces }}
+        - --namespace
+        - {{ $ns | quote }}
+        {{- end }}
+        - --direction
+        - {{ .Values.daemon.direction | quote }}
+        - --selector
+        - {{ $selector | quote }}
+        - --marker-header
+        - {{ $header | quote }}
+        - --marker-value
+        - {{ $value | quote }}
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef: {fieldPath: spec.nodeName}
+        readinessProbe:
+          exec: {command: ["/collector", "health"]}
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 1
+        resources:
+          {{- toYaml .Values.daemon.resources | nindent 10 }}
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          runAsNonRoot: false
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile: {type: Unconfined}
+          capabilities:
+            drop: [ALL]
+            add: [BPF, PERFMON, SYS_PTRACE]
+        volumeMounts:
+        - {name: state, mountPath: /run/collector}
+        - {name: btf, mountPath: /sys/kernel/btf, readOnly: true}
+        - {name: tracefs, mountPath: /sys/kernel/tracing, readOnly: true}
+      volumes:
+      - name: state
+        emptyDir: {medium: Memory, sizeLimit: 1Mi}
+      - name: btf
+        hostPath: {path: /sys/kernel/btf, type: Directory}
+      - name: tracefs
+        hostPath: {path: /sys/kernel/tracing, type: Directory}
+{{- end }}

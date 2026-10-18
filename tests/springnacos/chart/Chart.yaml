@@ -1,0 +1,5 @@
+apiVersion: v2
+name: spring-nacos-demo
+description: Isolated synthetic Spring HTTP and Nacos configuration capture demo
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,12 @@
+.git
+.local
+.env
+.env.*
+**/*.pem
+**/*.key
+**/kubeconfig*
+evidence
+docs
+tasks
+tests
+.DS_Store

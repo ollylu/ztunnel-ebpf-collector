@@ -1,0 +1,57 @@
+{{- if and (not .Values.capture) (not .Values.daemon.enabled) }}
+{{- if not .Values.syntheticReplay }}{{ fail "syntheticReplay must be true in this release" }}{{ end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-replay
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    source_kind: synthetic_replay
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 60
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: replay
+          image: {{ include "collector.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["replay", "--input", "/fixtures/colored_pair.jsonl"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: fixture
+              mountPath: /fixtures
+              readOnly: true
+      volumes:
+        - name: fixture
+          configMap:
+            name: {{ .Release.Name }}-replay-fixture
+
+{{- end }}

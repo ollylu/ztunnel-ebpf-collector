@@ -1,0 +1,36 @@
+# 默认仅回放；显式capture模式是Linux amd64上限30秒的实验Job。
+capture: false
+syntheticReplay: true
+image:
+  repository: ztunnel-ebpf-collector
+  tag: latest
+  digest: "" # If set, overrides tag; use the registry manifest digest, not local image ID.
+  pullPolicy: IfNotPresent
+imagePullSecrets: [] # Existing Secrets in the collector namespace; never put credentials here.
+
+captureConfig:
+  source: ztunnel # daprd: verified server Pod proxy, loopback app channel only
+  node: ""
+  server: ""
+  # Repeatable namespace/pod:port, max 32; no protocol hint. Mutually exclusive with server.
+  targets: []
+  port: 8080
+  markerHeader: ""
+  markerValue: ""
+  duration: 15s
+  # 控制面PodList快照，不是业务报文；部署前重新获取。
+  podList: ""
+
+# Opt-in continuous node agent. No protocol settings: only scope + ports.
+daemon:
+  enabled: false
+  direction: inbound # inbound, outbound, both (two observations, not global deduplication)
+  namespace: "" # Legacy single namespace; mutually exclusive with namespaces.
+  namespaces: [] # Exact allowlist, 1-32 names; shared node budgets.
+  selector: "" # one exact label key=value, required
+  nodeSelector: {}
+  tolerations: []
+  priorityClassName: ""
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}

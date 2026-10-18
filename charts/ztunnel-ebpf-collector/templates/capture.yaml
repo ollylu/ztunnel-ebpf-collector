@@ -1,0 +1,97 @@
+{{- if and .Values.capture (not .Values.daemon.enabled) }}
+{{- if .Values.syntheticReplay }}{{ fail "capture requires syntheticReplay=false" }}{{ end }}
+{{- $node := required "captureConfig.node is required" .Values.captureConfig.node }}
+{{- $targets := .Values.captureConfig.targets | default list }}
+{{- $server := .Values.captureConfig.server }}
+{{- if $targets }}
+{{- if or $server (ne (.Values.captureConfig.source | default "ztunnel") "ztunnel") }}{{ fail "targets require ztunnel source and no server" }}{{ end }}
+{{- if gt (len $targets) 32 }}{{ fail "maximum 32 targets" }}{{ end }}
+{{- else }}
+{{- $server = required "captureConfig.server or targets is required" $server }}
+{{- end }}
+{{- $header := required "captureConfig.markerHeader is required" .Values.captureConfig.markerHeader }}
+{{- $value := required "captureConfig.markerValue is required" .Values.captureConfig.markerValue }}
+{{- $pods := required "captureConfig.podList is required" .Values.captureConfig.podList }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-capture-metadata
+data:
+  pods.json: {{ $pods | quote }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-capture
+  labels:
+    source_kind: live_socket
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 45
+  template:
+    metadata:
+      labels:
+        source_kind: live_socket
+        istio.io/dataplane-mode: none
+    spec:
+      nodeName: {{ $node }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      hostPID: true
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      containers:
+      - name: collector
+        image: {{ include "collector.image" . | quote }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+        - capture
+        - --source
+        - {{ .Values.captureConfig.source | default "ztunnel" | quote }}
+        - --pods
+        - /metadata/pods.json
+        - --node
+        - {{ $node | quote }}
+        {{- if $targets }}
+        {{- range $targets }}
+        - --target
+        - {{ . | quote }}
+        {{- end }}
+        {{- else }}
+        - --server
+        - {{ $server | quote }}
+        - --port
+        - {{ .Values.captureConfig.port | quote }}
+        {{- end }}
+        - --marker-header
+        - {{ $header | quote }}
+        - --marker-value
+        - {{ $value | quote }}
+        - --duration
+        - {{ .Values.captureConfig.duration | quote }}
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: 500m, memory: 256Mi}
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          runAsNonRoot: false
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile: {type: Unconfined}
+          capabilities:
+            drop: [ALL]
+            add: [BPF, PERFMON, SYS_PTRACE]
+        volumeMounts:
+        - {name: metadata, mountPath: /metadata, readOnly: true}
+        - {name: btf, mountPath: /sys/kernel/btf, readOnly: true}
+        - {name: tracefs, mountPath: /sys/kernel/tracing, readOnly: true}
+      volumes:
+      - name: metadata
+        configMap: {name: {{ .Release.Name }}-capture-metadata}
+      - name: btf
+        hostPath: {path: /sys/kernel/btf, type: Directory}
+      - name: tracefs
+        hostPath: {path: /sys/kernel/tracing, type: Directory}
+{{- end }}

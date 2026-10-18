@@ -1,0 +1,5 @@
+*
+!target/
+!target/spring-nacos-demo-0.1.0.jar
+!target/demo-client
+!Dockerfile

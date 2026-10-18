@@ -1,0 +1,24 @@
+# Replace repository, namespaces, selector and marker with internal environment values.
+# Do not commit credentials; registry-auth must already exist in the release namespace.
+syntheticReplay: false
+capture: false
+image:
+  repository: registry.example.com/observability/ztunnel-ebpf-collector
+  tag: replace-with-git-sha-amd64
+  digest: "" # CI should override with registry sha256 manifest digest.
+  pullPolicy: IfNotPresent
+imagePullSecrets:
+  - name: registry-auth
+captureConfig:
+  markerHeader: Debug-Token
+  markerValue: "yes"
+daemon:
+  enabled: true
+  direction: both
+  namespaces: [orders, payments]
+  selector: "observe=yes"
+  nodeSelector: {} # Start with an approved test node label, then expand.
+  tolerations: [] # Only tolerate explicitly approved dedicated nodes.
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}

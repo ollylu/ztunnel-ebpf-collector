@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ztunnel-ebpf-collector
+description: Go/asm observer with opt-in Linux amd64 node DaemonSet, bounded capture or replay
+type: application
+version: 0.2.0
+appVersion: "0.1.0"
