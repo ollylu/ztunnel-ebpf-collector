@@ -1,0 +1,20 @@
+#!/bin/sh
+# Fail closed: only an audited public checkout may push an explicitly reviewed HEAD.
+set -eu
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+fail() { echo "public-push gate: $*" >&2; exit 1; }
+[ "$(git config --local --get security.publicRelease || true)" = true ] ||
+  fail 'private development checkout: publish from a sanitized public checkout only'
+[ -z "$(git status --porcelain)" ] || fail 'worktree must be clean before publication review'
+head=$(git rev-parse HEAD)
+reviewed=$(git config --local --get security.reviewedPublicSHA || true)
+[ "$reviewed" = "$head" ] || fail 'current HEAD has no publication review; sanitize and review files/history first'
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$head" ] || fail 'only the reviewed HEAD may be pushed; no old branches, deletions or annotated tags'
+done
+scanner=${GITLEAKS_BIN:-gitleaks}
+command -v "$scanner" >/dev/null 2>&1 || fail 'Gitleaks is required; install it or set GITLEAKS_BIN (do not bypass the hook)'
+"$scanner" git "$root" --log-opts='--all --full-history' --redact=100 --no-banner --no-color --ignore-gitleaks-allow --max-decode-depth=5 --max-archive-depth=3 ||
+  fail 'secret scan failed or could not complete; publication blocked'
+echo 'public-push gate: reviewed HEAD and full-history secret scan passed' >&2
